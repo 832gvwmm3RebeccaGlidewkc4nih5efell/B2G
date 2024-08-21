@@ -1,0 +1,279 @@
+This document assumes you've already cloned the b2g repo to the path
+$B2G.
+
+
+ Dependencies
+--------------
+
+* You need to have adb set up to allow your machine to talk to your
+  phone.  Follow the instructions at
+
+    http://developer.android.com/guide/developing/device.html
+
+  Note when setting up udev, you need to specify the identifier for
+  your device's manufacturer in *lower case* hex.  That is,
+
+    ATTR{idVendor}=="0bb4"
+
+  not "0BB4".  If you use upper-case hex, the USB permissions will not
+  be set up correctly and heimdall will only work if you give it
+  superuser powers.
+
+* If you're building for the Galaxy S II, you need to install
+  "Heimdall" to be able to flash your phone with B2G.  Follow the
+  instructions at
+
+    http://www.glassechidna.com.au/products/heimdall/
+
+  (Even if you're not building for the Galaxy S II, it's not a bad
+  idea to install Heimdall anyway.)
+
+* There are a few other dependencies you may find necessary to
+  install.  These were found to be necessary when building on a ubuntu
+  64bit system.
+
+    # sudo apt-get install ia32-libs gcc-multilib g++-multilib bison \
+      flex gperf lib32z1-dev lib32ncurses5-dev lib32ncursesw5-dev \
+      libidl-dev lib32gomp1 autoconf2.13 ccache libx11-dev \
+      lib32readline-gplv2-dev
+
+  lib32readline-gplv2-dev is available for Ubuntu 11.10. For Ubuntu 10.10
+  lib32readline5-dev seems to work fine.
+
+ Additional dependencies when building android backend
+-------------------------------------------------------
+
+* Sadly, B2G currently depends on not only the android source, but
+  also the android SDK and NDK.  These dependencies will be removed
+  eventually, but for now you need to install both.  Follow the
+  instructions at
+
+    http://developer.android.com/sdk/installing.html
+    http://developer.android.com/sdk/ndk/index.html
+
+  From here on, this document assumes you installed the SDK to the
+  path $ANDROID_SDK and the NDK to the path $ANDROID_NDK.
+
+ Quick start
+-------------
+
+ == Samsung Galaxy SII / Nexus 4G ==
+
+This only works if your bootloader is unlocked.  If it's not, or
+you're not sure, follow the more detailed instructions below.  Make
+sure to back up your phone before doing this.
+
+$ cd $B2G
+$ make sync
+$ cat > local.mk << EOF
+ANDROID_SDK="$ANDROID_SDK"
+ANDROID_NDK="$ANDROID_NDK"
+EOF
+$ make config-nexuss4g   # or, make config-galaxy-s2
+$ make flash
+
+# temporary hack you may need
+
+$ adb shell chmod -R 777 /data/system
+
+ == Android Emulator ==
+
+$ cd $B2G
+$ make sync
+$ make config-qemu
+$ make
+$ ./emu.sh
+
+ Detailed instructions
+-----------------------
+
+These instructions assume you have followed the directions in the
+"Dependencies" section.
+
+ == Initialize repository ==
+
+The repository is organized as a top-level B2G module with many
+submodules for the kernel, gecko, and other userspace libraries.
+Before doing anything else, you need to synchronize all these
+submodules
+
+$ cd $B2G
+$ make sync
+
+This takes a *long* time, so be patient.  Whenever you want to pull
+from upstream again, just re-run |make sync|.
+
+ == [TEMPORARY] Configure local SDK and NDK paths ==
+
+We're using these currently for reasons not worth knowing.
+
+# for android backend
+
+$ cat > local.mk << EOF
+ANDROID_SDK="$ANDROID_SDK"
+ANDROID_NDK="$ANDROID_NDK"
+EOF
+
+# for gonk backend
+
+$ cat > local.mk << EOF
+WIDGET_BACKEND=gonk
+EOF
+
+ == Configure repo for your device ==
+
+ Nexus S 4G: 
+$ make config-nexuss4g
+
+ Galaxy S II:
+$ make config-galaxy-s2
+
+ Android Emulator:
+$ make config-qemu
+
+This configures submodules appropriately for the given device, and for
+devices with proprietary libraries, will attempt to download and
+install the blobs.  The blobs may ask you to agree to an EULA before
+they will install.
+
+In the case of the Nexus S 4G at least, you don't *need* to install
+the proprietary blobs if you don't want to; if you don't, the device
+will function, only more slowly and without access to some sensors.
+
+ == Build the code ==
+
+This part is relatively simple
+
+$ make -jN
+
+where N is slightly more than the number of cores you have in your
+machine.
+
+This step can take a long time.  Subsequent rebuilds will usually be
+much faster, though.
+
+At this stage, if you're building from the Android emulator, you just
+need to run the provided script and you're done.
+
+$ ./emu.sh
+
+ == Unlock your device's bootloader ==
+
+This is only needed for the Nexus S 4G.
+
+The step above builds host tools as well as the device image.  We need
+the host tools to unlock the bootloader.
+
+WARNING: This next command deletes *ALL* your user data.  Make sure
+you back up beforehand.
+
+$ make unlock-bootloader
+
+If this works, you should see your device reboot into a
+terminal-looking black screen with a large android logo in the middle
+and some small text to the top-left and bottom-left.  Follow the
+on-screen instructions to confirm unlocking the bootloader.  After
+that, your device reboot.
+
+ == Back up device ==
+
+WARNING: Only tested with the Galaxy S II.  Instructions will be
+different for other phones.  This backup process is absolutely
+essential for the Galaxy S II because the B2G image is very unstable
+there.
+
+These steps install the "ClockworkMod" recovery image.  Among other
+things, it lets you make full backups of the phone's partitions to the
+sdcard, and restore them.  This is extraordinarily useful.  To install
+ClockworkMod
+
+$ cd /tmp
+$ wget http://cmw.22aaf3.com/c1/recovery/recovery-clockwork-4.0.1.4-galaxys2.tar
+$ tar xvf recovery-clockwork-*.tar
+$ adb reboot download
+
+This puts your phone into "download mode", in which it's ready to be
+flashed using the "Odin" protocol.  Your phone should boot into a
+screen that says something like, "Downloading, Do not turn off!".  If
+not, something went wrong.  To actually flash ClockworkMod
+
+$ heimdall flash --kernel zImage
+
+When this finishes, your phone should reboot normally.  If not,
+something went wrong, get help.  Finally, let's back up your phone's
+current image
+
+$ adb reboot recovery
+
+This boots your phone into a screen that says "ClockworkMod Recovery"
+at the top-left.  Follow the on-screen instructions to make a backup
+image.
+
+ == Flash device ==
+
+The "image" to be flashed comprises the custom-built kernel and all
+the userspace programs and libraries.
+
+WARNING: This next command deletes *ALL* your user data.  Make sure
+you back up beforehand.  If the image is bad, it can also *BRICK* your
+phone.  Flash at your own risk.
+
+NOTE: For the Galaxy S II, you must first reboot into recovery mode
+(adb reboot recovery), then choose "wipe data/factory reset".  This
+will be fixed.  BE SURE you don't reboot your phone before running the
+following step.  That is, you should run "make flash" while your phone
+is still in recovery mode.
+
+$ make flash
+
+If all goes well, you'll see the phone reboot into the bootloader,
+then your host machine will report the progress of files it uploads
+and installs on the device.  After finishing, the device will reboot.
+
+# temporary hack you may need on the android backend
+
+$ adb shell chmod -R 777 /data/system
+
+# temporary hack you may need on the gonk backend, although the Makefile tries
+# to do it for you.
+
+$ adb shell chmod 755 /system/b2g/b2g
+
+ == Kernel flashing ==
+
+The kernel should also be flashed when using the gonk backend on a SII.
+It only needs to be done once when switching to the gonk backend.
+This will overwrite ClockworkMod.
+
+GET A DOWNLOAD MODE JIG BEFORE ATTEMPTING THIS!
+The flashing process is known to fail.
+
+$ make kernel
+$ adb reboot download
+$ heimdall flash --kernel boot/kernel-android-galaxy-s2/arch/arm/boot/zImage
+
+ == Install Gaia ==
+
+Gaia is the phone experience prototype being developed by Mozilla. It
+is built into the system image by default. To update gaia on a flashed
+device, run
+
+$ make install-gaia
+
+If you press the "Home" button on device, the Gaia homescreen will
+reload.
+
+== Troubleshooting ==
+
+If you get a message at the end of the install-gecko process that says:
+# /sbin/sh pm not found
+Then this refers to the android package manager not working properly on the device.
+The reason it's not working is that it doesn't have permissions to write to /data/system.
+To fix:
+1. $ adb push gecko/objdir-prof-android/dist/b2g-9.0a1.en-US.android-arm.apk /data/local/tmp/b2g.apk
+2. $ adb shell
+3. # chmod -R 777 /data/system
+4. # sh /system/bin/pm install -r /data/local/tmp/b2g.apk
+5. # reboot
+
+Happy hacking.
